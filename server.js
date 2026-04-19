@@ -1,56 +1,53 @@
 const http = require("http");
 const WebSocket = require("ws");
 
-console.log("SERVER STARTED");
-
-// ✅ Create HTTP server (Render needs this)
 const server = http.createServer((req, res) => {
-  res.writeHead(200, { "Content-Type": "text/plain" });
-  res.end("WebSocket server is running");
+  res.writeHead(200);
+  res.end("OK");
 });
 
-// ✅ Attach WebSocket to HTTP server
 const wss = new WebSocket.Server({ server });
 
 let clients = [];
 
-wss.on("connection", (ws, req) => {
-  console.log("CLIENT CONNECTED:", req.socket.remoteAddress);
-
+wss.on("connection", (ws) => {
   clients.push(ws);
+  console.log("CLIENT CONNECTED");
 
-  ws.on("message", (message) => {
-    console.log("MESSAGE RECEIVED:", message.toString());
-
+  ws.on("message", (msg) => {
     let data;
+
     try {
-      data = JSON.parse(message);
+      data = JSON.parse(msg);
     } catch (e) {
-      console.log("INVALID JSON");
       return;
     }
 
-    // 🔁 Broadcast to all OTHER clients
+    // 🔥 ROUTE BY TYPE (THIS IS THE FIX)
     clients.forEach(client => {
       if (client !== ws && client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify(data));
+
+        if (data.offer) {
+          client.send(JSON.stringify({ offer: data.offer }));
+        }
+
+        if (data.answer) {
+          client.send(JSON.stringify({ answer: data.answer }));
+        }
+
+        if (data.candidate) {
+          client.send(JSON.stringify({ candidate: data.candidate }));
+        }
+
       }
     });
   });
 
   ws.on("close", () => {
-    console.log("CLIENT DISCONNECTED");
     clients = clients.filter(c => c !== ws);
-  });
-
-  ws.on("error", (err) => {
-    console.log("WS ERROR:", err.message);
   });
 });
 
-// ✅ IMPORTANT: Bind to 0.0.0.0 for Render
-const PORT = process.env.PORT || 10000;
-
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`Server running on 0.0.0.0:${PORT}`);
+server.listen(process.env.PORT || 10000, "0.0.0.0", () => {
+  console.log("Server running");
 });

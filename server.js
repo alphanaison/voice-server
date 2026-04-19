@@ -2,21 +2,17 @@ const http = require("http");
 const WebSocket = require("ws");
 
 const server = http.createServer((req, res) => {
-  res.end("Voice server running");
+  res.end("Voice server alive");
 });
 
 const wss = new WebSocket.Server({ server });
 
-// userId → ws
-const users = new Map();
-
-// callId → { from, to, status }
-const calls = new Map();
+const users = new Map(); // id -> ws
 
 function send(to, data) {
-  const ws = users.get(to);
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(data));
+  const client = users.get(to);
+  if (client && client.readyState === WebSocket.OPEN) {
+    client.send(JSON.stringify(data));
   }
 }
 
@@ -24,47 +20,22 @@ wss.on("connection", (ws) => {
   let userId = null;
 
   ws.on("message", (msg) => {
-    let data;
-    try {
-      data = JSON.parse(msg.toString());
-    } catch {
-      return;
-    }
+    const data = JSON.parse(msg.toString());
 
     // REGISTER
     if (data.type === "register") {
-      userId = data.id;
+      userId = data.from;
       users.set(userId, ws);
-
-      console.log("REGISTER:", userId);
+      console.log("REGISTERED:", userId);
       return;
     }
 
-    // CALL INITIATION
+    // CALL -> forward incoming call
     if (data.type === "call") {
-      const callId = `${data.from}->${data.to}`;
-
-      calls.set(callId, {
-        from: data.from,
-        to: data.to,
-        status: "ringing"
-      });
-
       send(data.to, {
         type: "incoming",
         from: data.from,
-        callId
-      });
-
-      return;
-    }
-
-    // OFFER
-    if (data.type === "offer") {
-      send(data.to, {
-        type: "offer",
-        from: data.from,
-        offer: data.offer
+        payload: data.payload
       });
       return;
     }
@@ -74,7 +45,7 @@ wss.on("connection", (ws) => {
       send(data.to, {
         type: "answer",
         from: data.from,
-        answer: data.answer
+        payload: data.payload
       });
       return;
     }
@@ -83,23 +54,28 @@ wss.on("connection", (ws) => {
     if (data.type === "ice") {
       send(data.to, {
         type: "ice",
-        candidate: data.candidate
+        from: data.from,
+        payload: data.payload
       });
       return;
     }
 
     // HANGUP
     if (data.type === "hangup") {
-      send(data.to, { type: "hangup" });
+      send(data.to, {
+        type: "hangup",
+        from: data.from
+      });
       return;
     }
   });
 
   ws.on("close", () => {
     if (userId) users.delete(userId);
+    console.log("DISCONNECTED:", userId);
   });
 });
 
 server.listen(process.env.PORT || 10000, "0.0.0.0", () => {
-  console.log("PRODUCTION VOICE SERVER RUNNING");
+  console.log("SERVER READY");
 });

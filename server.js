@@ -34,7 +34,16 @@ function setStatus(msg) {
   statusEl.innerText = "Status: " + msg;
 }
 
-// ---------------- FORCE CONNECT ----------------
+// ---------------- SAFE SEND ----------------
+function send(data) {
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify(data));
+  } else {
+    log("WS not ready ❌");
+  }
+}
+
+// ---------------- CONNECT ----------------
 function connect() {
   log("Connecting WebSocket...");
 
@@ -45,14 +54,15 @@ function connect() {
     setStatus("connected");
   };
 
-  ws.onerror = (e) => {
+  ws.onerror = () => {
     log("WebSocket ERROR ❌");
     setStatus("error");
   };
 
   ws.onclose = () => {
-    log("WebSocket CLOSED ❌");
-    setStatus("disconnected");
+    log("WebSocket CLOSED ❌ retrying...");
+    setStatus("reconnecting...");
+    setTimeout(connect, 2000);
   };
 
   ws.onmessage = async (event) => {
@@ -61,37 +71,44 @@ function connect() {
     let data;
     try {
       data = JSON.parse(event.data);
-    } catch (e) {
-      log("Bad JSON");
+    } catch {
       return;
     }
 
+    // 📞 incoming call
     if (data.offer) {
       incomingOffer = data.offer;
       setStatus("📞 incoming call");
       alert("Incoming Call 📞");
     }
 
+    // 📲 answer received
     if (data.answer && pc) {
       await pc.setRemoteDescription(data.answer);
       setStatus("in call");
     }
 
+    // 📡 ICE
     if (data.candidate && pc) {
       try {
         await pc.addIceCandidate(data.candidate);
-      } catch (e) {
-        log("ICE error");
-      }
+      } catch {}
+    }
+
+    // ❌ hangup
+    if (data.hangup) {
+      cleanup();
+      setStatus("call ended");
     }
   };
 }
 
-// START IMMEDIATELY
 connect();
 
 // ---------------- PEER ----------------
 async function createPeer() {
+  cleanup(); // important reset before new call
+
   pc = new RTCPeerConnection({
     iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
   });
@@ -102,7 +119,7 @@ async function createPeer() {
 
   pc.onicecandidate = (e) => {
     if (e.candidate) {
-      ws.send(JSON.stringify({ candidate: e.candidate }));
+      send({ candidate: e.candidate });
     }
   };
 
@@ -119,7 +136,7 @@ async function startCall() {
   log("CALL CLICKED");
 
   if (!ws || ws.readyState !== 1) {
-    alert("WebSocket not connected yet");
+    alert("Not connected yet");
     return;
   }
 
@@ -128,7 +145,7 @@ async function startCall() {
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
 
-  ws.send(JSON.stringify({ offer }));
+  send({ offer });
 
   setStatus("calling...");
   log("Offer sent");
@@ -150,18 +167,25 @@ async function answerCall() {
   const answer = await pc.createAnswer();
   await pc.setLocalDescription(answer);
 
-  ws.send(JSON.stringify({ answer }));
+  send({ answer });
 
   setStatus("in call");
 }
 
 // ---------------- HANGUP ----------------
 function hangUp() {
-  ws.send(JSON.stringify({ hangup: true }));
-  if (pc) pc.close();
-  pc = null;
-  incomingOffer = null;
+  send({ hangup: true });
+  cleanup();
   setStatus("ended");
+}
+
+// ---------------- CLEANUP ----------------
+function cleanup() {
+  if (pc) {
+    pc.close();
+    pc = null;
+  }
+  incomingOffer = null;
 }
 </script>
 

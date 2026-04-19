@@ -10,75 +10,47 @@ const server = http.createServer((req, res) => {
 
 const wss = new WebSocket.Server({ server });
 
-// store active clients
-const clients = new Set();
-
-// ---------------- HEARTBEAT (PREVENT RANDOM DROPS) ----------------
-function heartbeat() {
-  this.isAlive = true;
-}
-
-setInterval(() => {
-  wss.clients.forEach((ws) => {
-    if (ws.isAlive === false) {
-      console.log("KILLING DEAD CLIENT");
-      return ws.terminate();
-    }
-
-    ws.isAlive = false;
-    ws.ping();
-  });
-}, 30000);
-
-// ---------------- CONNECTION ----------------
+// simple relay (safe + stable)
 wss.on("connection", (ws) => {
   console.log("CLIENT CONNECTED");
 
   ws.isAlive = true;
-  ws.on("pong", heartbeat);
 
-  clients.add(ws);
+  ws.on("pong", () => {
+    ws.isAlive = true;
+  });
 
-  // ---------------- MESSAGE HANDLER ----------------
   ws.on("message", (msg) => {
     let data;
 
     try {
       data = JSON.parse(msg.toString());
-    } catch (err) {
-      console.log("INVALID JSON IGNORED");
+    } catch {
       return;
     }
 
-    const type = Object.keys(data)[0];
-    console.log("MSG TYPE:", type);
-
-    // relay to others
-    broadcast(ws, data);
+    // relay to everyone except sender
+    wss.clients.forEach((client) => {
+      if (client !== ws && client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify(data));
+      }
+    });
   });
 
   ws.on("close", () => {
     console.log("CLIENT DISCONNECTED");
-    clients.delete(ws);
-  });
-
-  ws.on("error", (err) => {
-    console.log("WS ERROR:", err.message);
   });
 });
 
-// ---------------- BROADCAST ----------------
-function broadcast(sender, data) {
-  const payload = JSON.stringify(data);
-
-  wss.clients.forEach((client) => {
-    if (client !== sender && client.readyState === WebSocket.OPEN) {
-      client.send(payload);
-    }
+// heartbeat (prevents silent disconnects)
+setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (!ws.isAlive) return ws.terminate();
+    ws.isAlive = false;
+    ws.ping();
   });
-}
+}, 30000);
 
-// ---------------- START SERVER ----------------
 const PORT = process.env.PORT || 10000;
 
 server.listen(PORT, "0.0.0.0", () => {

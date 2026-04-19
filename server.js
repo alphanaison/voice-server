@@ -10,33 +10,56 @@ const server = http.createServer((req, res) => {
 
 const wss = new WebSocket.Server({ server });
 
-function broadcast(sender, data) {
-  wss.clients.forEach((client) => {
-    if (client !== sender && client.readyState === WebSocket.OPEN) {
-      client.send(data);
-    }
-  });
+// store active clients
+const clients = new Set();
+
+// ---------------- HEARTBEAT (PREVENT RANDOM DROPS) ----------------
+function heartbeat() {
+  this.isAlive = true;
 }
 
+setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (ws.isAlive === false) {
+      console.log("KILLING DEAD CLIENT");
+      return ws.terminate();
+    }
+
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, 30000);
+
+// ---------------- CONNECTION ----------------
 wss.on("connection", (ws) => {
   console.log("CLIENT CONNECTED");
 
+  ws.isAlive = true;
+  ws.on("pong", heartbeat);
+
+  clients.add(ws);
+
+  // ---------------- MESSAGE HANDLER ----------------
   ws.on("message", (msg) => {
+    let data;
+
     try {
-      const data = JSON.parse(msg.toString());
-
-      console.log("MSG TYPE:", Object.keys(data)[0]);
-
-      // Relay everything except sender
-      broadcast(ws, JSON.stringify(data));
-
+      data = JSON.parse(msg.toString());
     } catch (err) {
-      console.log("INVALID MESSAGE RECEIVED");
+      console.log("INVALID JSON IGNORED");
+      return;
     }
+
+    const type = Object.keys(data)[0];
+    console.log("MSG TYPE:", type);
+
+    // relay to others
+    broadcast(ws, data);
   });
 
   ws.on("close", () => {
     console.log("CLIENT DISCONNECTED");
+    clients.delete(ws);
   });
 
   ws.on("error", (err) => {
@@ -44,6 +67,18 @@ wss.on("connection", (ws) => {
   });
 });
 
+// ---------------- BROADCAST ----------------
+function broadcast(sender, data) {
+  const payload = JSON.stringify(data);
+
+  wss.clients.forEach((client) => {
+    if (client !== sender && client.readyState === WebSocket.OPEN) {
+      client.send(payload);
+    }
+  });
+}
+
+// ---------------- START SERVER ----------------
 const PORT = process.env.PORT || 10000;
 
 server.listen(PORT, "0.0.0.0", () => {

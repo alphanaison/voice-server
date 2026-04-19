@@ -1,6 +1,9 @@
+const http = require("http");
 const WebSocket = require("ws");
 
-const wss = new WebSocket.Server({ port: process.env.PORT || 8080 });
+const server = http.createServer();
+
+const wss = new WebSocket.Server({ server });
 
 let clients = [];
 
@@ -26,4 +29,10 @@ wss.on("connection", (ws) => {
   ws.on("close", () => {
     clients = clients.filter(c => c !== ws);
   });
+});
+
+const PORT = process.env.PORT || 10000;
+
+server.listen(PORT, () => {
+  console.log("Server running on port", PORT);
 });

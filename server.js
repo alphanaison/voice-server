@@ -1,120 +1,114 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Voice Call System</title>
+  <title>Voice Debug System</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 </head>
 <body>
 
-<h2>Voice Call System</h2>
+<h2>Voice Debug System</h2>
 
 <button onclick="startCall()">📞 Call</button>
 <button onclick="answerCall()">📲 Answer</button>
-<button onclick="declineCall()">❌ Decline</button>
 <button onclick="hangUp()">🔴 Hang Up</button>
 
-<p id="status">Status: idle</p>
+<p id="status">Status: starting...</p>
+<pre id="log"></pre>
 
 <script>
 const SERVER = "wss://voice-server-s87r.onrender.com";
 
 let ws;
 let pc;
-let localStream;
 let incomingOffer = null;
 
 const statusEl = document.getElementById("status");
+const logEl = document.getElementById("log");
 
-// ---------------- STATUS ----------------
-function setStatus(text) {
-  statusEl.innerText = "Status: " + text;
+function log(msg) {
+  console.log(msg);
+  logEl.innerText += msg + "\n";
 }
 
-// ---------------- CONNECT (ALWAYS ACTIVE) ----------------
+function setStatus(msg) {
+  statusEl.innerText = "Status: " + msg;
+}
+
+// ---------------- FORCE CONNECT ----------------
 function connect() {
+  log("Connecting WebSocket...");
+
   ws = new WebSocket(SERVER);
 
   ws.onopen = () => {
-    console.log("CONNECTED");
+    log("WebSocket OPEN ✅");
     setStatus("connected");
   };
 
-  ws.onmessage = async (event) => {
-    const data = JSON.parse(event.data);
-    console.log("RECEIVED:", data);
+  ws.onerror = (e) => {
+    log("WebSocket ERROR ❌");
+    setStatus("error");
+  };
 
-    // 📞 INCOMING CALL
+  ws.onclose = () => {
+    log("WebSocket CLOSED ❌");
+    setStatus("disconnected");
+  };
+
+  ws.onmessage = async (event) => {
+    log("MESSAGE: " + event.data);
+
+    let data;
+    try {
+      data = JSON.parse(event.data);
+    } catch (e) {
+      log("Bad JSON");
+      return;
+    }
+
     if (data.offer) {
       incomingOffer = data.offer;
       setStatus("📞 incoming call");
-
-      // visual + alert so you can't miss it
       alert("Incoming Call 📞");
     }
 
-    // 📲 ANSWER RECEIVED
     if (data.answer && pc) {
       await pc.setRemoteDescription(data.answer);
       setStatus("in call");
     }
 
-    // 📡 ICE CANDIDATES
     if (data.candidate && pc) {
       try {
         await pc.addIceCandidate(data.candidate);
       } catch (e) {
-        console.log("ICE error", e);
+        log("ICE error");
       }
     }
-
-    // ❌ DECLINE
-    if (data.decline) {
-      setStatus("call declined");
-      cleanup();
-    }
-
-    // 🔴 HANGUP
-    if (data.hangup) {
-      setStatus("call ended");
-      cleanup();
-    }
-  };
-
-  ws.onclose = () => {
-    setStatus("disconnected");
   };
 }
 
-// start connection immediately
+// START IMMEDIATELY
 connect();
 
-// ---------------- PEER SETUP ----------------
+// ---------------- PEER ----------------
 async function createPeer() {
   pc = new RTCPeerConnection({
-    iceServers: [
-      { urls: "stun:stun.l.google.com:19302" }
-    ]
+    iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
   });
 
-  localStream = await navigator.mediaDevices.getUserMedia({
-    audio: {
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true
-    }
-  });
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-  localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+  stream.getTracks().forEach(t => pc.addTrack(t, stream));
 
-  pc.onicecandidate = (event) => {
-    if (event.candidate) {
-      ws.send(JSON.stringify({ candidate: event.candidate }));
+  pc.onicecandidate = (e) => {
+    if (e.candidate) {
+      ws.send(JSON.stringify({ candidate: e.candidate }));
     }
   };
 
-  pc.ontrack = (event) => {
+  pc.ontrack = (e) => {
     const audio = document.createElement("audio");
-    audio.srcObject = event.streams[0];
+    audio.srcObject = e.streams[0];
     audio.autoplay = true;
     document.body.appendChild(audio);
   };
@@ -122,8 +116,10 @@ async function createPeer() {
 
 // ---------------- CALL ----------------
 async function startCall() {
+  log("CALL CLICKED");
+
   if (!ws || ws.readyState !== 1) {
-    alert("Not connected yet");
+    alert("WebSocket not connected yet");
     return;
   }
 
@@ -135,10 +131,13 @@ async function startCall() {
   ws.send(JSON.stringify({ offer }));
 
   setStatus("calling...");
+  log("Offer sent");
 }
 
 // ---------------- ANSWER ----------------
 async function answerCall() {
+  log("ANSWER CLICKED");
+
   if (!incomingOffer) {
     alert("No incoming call");
     return;
@@ -156,25 +155,13 @@ async function answerCall() {
   setStatus("in call");
 }
 
-// ---------------- DECLINE ----------------
-function declineCall() {
-  ws.send(JSON.stringify({ decline: true }));
-  cleanup();
-  setStatus("declined");
-}
-
 // ---------------- HANGUP ----------------
 function hangUp() {
   ws.send(JSON.stringify({ hangup: true }));
-  cleanup();
-  setStatus("ended");
-}
-
-// ---------------- CLEANUP ----------------
-function cleanup() {
   if (pc) pc.close();
   pc = null;
   incomingOffer = null;
+  setStatus("ended");
 }
 </script>
 

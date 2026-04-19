@@ -4,21 +4,21 @@ const WebSocket = require("ws");
 console.log("SERVER STARTED");
 
 const server = http.createServer((req, res) => {
-  res.writeHead(200, { "Content-Type": "text/plain" });
-  res.end("WebRTC signaling server alive");
+  res.end("WebRTC server alive");
 });
 
 const wss = new WebSocket.Server({ server });
 
-// simple relay (safe + stable)
+// store users by ID
+const users = new Map();
+
+/*
+Client must first send:
+{ register: "user1" }
+*/
+
 wss.on("connection", (ws) => {
-  console.log("CLIENT CONNECTED");
-
-  ws.isAlive = true;
-
-  ws.on("pong", () => {
-    ws.isAlive = true;
-  });
+  let userId = null;
 
   ws.on("message", (msg) => {
     let data;
@@ -29,27 +29,28 @@ wss.on("connection", (ws) => {
       return;
     }
 
-    // relay to everyone except sender
-    wss.clients.forEach((client) => {
-      if (client !== ws && client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify(data));
+    // REGISTER USER
+    if (data.register) {
+      userId = data.register;
+      users.set(userId, ws);
+      console.log("REGISTERED:", userId);
+      return;
+    }
+
+    // ROUTE CALLS
+    if (data.to && users.has(data.to)) {
+      const target = users.get(data.to);
+
+      if (target.readyState === WebSocket.OPEN) {
+        target.send(JSON.stringify(data));
       }
-    });
+    }
   });
 
   ws.on("close", () => {
-    console.log("CLIENT DISCONNECTED");
+    if (userId) users.delete(userId);
   });
 });
-
-// heartbeat (prevents silent disconnects)
-setInterval(() => {
-  wss.clients.forEach((ws) => {
-    if (!ws.isAlive) return ws.terminate();
-    ws.isAlive = false;
-    ws.ping();
-  });
-}, 30000);
 
 const PORT = process.env.PORT || 10000;
 

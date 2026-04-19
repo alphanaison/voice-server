@@ -3,7 +3,11 @@ const WebSocket = require("ws");
 
 console.log("SERVER STARTED");
 
-const server = http.createServer();
+const server = http.createServer((req, res) => {
+  // 🔥 THIS FIXES YOUR PROBLEM
+  res.writeHead(200);
+  res.end("WebSocket server is running");
+});
 
 const wss = new WebSocket.Server({ server });
 

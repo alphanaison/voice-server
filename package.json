@@ -1,73 +1,12 @@
 {
-  "types": {
-    "register": {
-      "description": "User joins system",
-      "required": ["type", "from"],
-      "example": {
-        "type": "register",
-        "from": "alpha"
-      }
-    },
-
-    "call": {
-      "description": "Caller initiates call",
-      "required": ["type", "from", "to", "payload"],
-      "example": {
-        "type": "call",
-        "from": "alpha",
-        "to": "beta",
-        "payload": {
-          "offer": "RTC_OFFER_OBJECT"
-        }
-      }
-    },
-
-    "incoming": {
-      "description": "Server notifies receiver of incoming call",
-      "required": ["type", "from", "payload"],
-      "example": {
-        "type": "incoming",
-        "from": "alpha",
-        "payload": {
-          "offer": "RTC_OFFER_OBJECT"
-        }
-      }
-    },
-
-    "answer": {
-      "description": "Receiver answers call",
-      "required": ["type", "from", "to", "payload"],
-      "example": {
-        "type": "answer",
-        "from": "beta",
-        "to": "alpha",
-        "payload": {
-          "answer": "RTC_ANSWER_OBJECT"
-        }
-      }
-    },
-
-    "ice": {
-      "description": "WebRTC network candidate exchange",
-      "required": ["type", "from", "to", "payload"],
-      "example": {
-        "type": "ice",
-        "from": "alpha",
-        "to": "beta",
-        "payload": {
-          "candidate": "ICE_CANDIDATE_OBJECT"
-        }
-      }
-    },
-
-    "hangup": {
-      "description": "End call",
-      "required": ["type", "from", "to"],
-      "example": {
-        "type": "hangup",
-        "from": "alpha",
-        "to": "beta"
-      }
-    }
+  "name": "voice-server",
+  "version": "1.0.0",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.17.0"
   }
 }

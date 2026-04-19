@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Voice Call</title>
+  <title>Voice Call System</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
 </head>
 <body>
 
@@ -20,16 +21,21 @@ const SERVER = "wss://voice-server-s87r.onrender.com";
 let ws;
 let pc;
 let localStream;
-
 let incomingOffer = null;
 
 const statusEl = document.getElementById("status");
 
-// ---------------- CONNECT ----------------
+// ---------------- STATUS ----------------
+function setStatus(text) {
+  statusEl.innerText = "Status: " + text;
+}
+
+// ---------------- CONNECT (ALWAYS ACTIVE) ----------------
 function connect() {
   ws = new WebSocket(SERVER);
 
   ws.onopen = () => {
+    console.log("CONNECTED");
     setStatus("connected");
   };
 
@@ -40,23 +46,24 @@ function connect() {
     // 📞 INCOMING CALL
     if (data.offer) {
       incomingOffer = data.offer;
-      setStatus("incoming call 📞");
+      setStatus("📞 incoming call");
 
-      alert("Incoming Call!");
+      // visual + alert so you can't miss it
+      alert("Incoming Call 📞");
     }
 
-    // 📲 ANSWER
+    // 📲 ANSWER RECEIVED
     if (data.answer && pc) {
       await pc.setRemoteDescription(data.answer);
       setStatus("in call");
     }
 
-    // 📡 ICE
+    // 📡 ICE CANDIDATES
     if (data.candidate && pc) {
       try {
         await pc.addIceCandidate(data.candidate);
       } catch (e) {
-        console.log(e);
+        console.log("ICE error", e);
       }
     }
 
@@ -72,9 +79,16 @@ function connect() {
       cleanup();
     }
   };
+
+  ws.onclose = () => {
+    setStatus("disconnected");
+  };
 }
 
-// ---------------- PEER ----------------
+// start connection immediately
+connect();
+
+// ---------------- PEER SETUP ----------------
 async function createPeer() {
   pc = new RTCPeerConnection({
     iceServers: [
@@ -108,7 +122,11 @@ async function createPeer() {
 
 // ---------------- CALL ----------------
 async function startCall() {
-  connect();
+  if (!ws || ws.readyState !== 1) {
+    alert("Not connected yet");
+    return;
+  }
+
   await createPeer();
 
   const offer = await pc.createOffer();
@@ -121,7 +139,10 @@ async function startCall() {
 
 // ---------------- ANSWER ----------------
 async function answerCall() {
-  if (!incomingOffer) return;
+  if (!incomingOffer) {
+    alert("No incoming call");
+    return;
+  }
 
   await createPeer();
 
@@ -149,16 +170,11 @@ function hangUp() {
   setStatus("ended");
 }
 
-// ---------------- CLEAN ----------------
+// ---------------- CLEANUP ----------------
 function cleanup() {
   if (pc) pc.close();
   pc = null;
   incomingOffer = null;
-}
-
-// ---------------- STATUS UI ----------------
-function setStatus(text) {
-  statusEl.innerText = "Status: " + text;
 }
 </script>
 

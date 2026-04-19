@@ -7,10 +7,18 @@ let clients = [];
 wss.on("connection", (ws) => {
   clients.push(ws);
 
-  ws.on("message", (msg) => {
+  ws.on("message", (message) => {
+    let data;
+
+    try {
+      data = JSON.parse(message);
+    } catch (e) {
+      return;
+    }
+
     clients.forEach(client => {
       if (client !== ws && client.readyState === 1) {
-        client.send(msg);
+        client.send(JSON.stringify(data));
       }
     });
   });

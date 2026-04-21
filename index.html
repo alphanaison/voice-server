@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voice Call App</title>
+</head>
+
+<body style="font-family:sans-serif;text-align:center;padding:20px;">
+
+<h2>📞 Voice Call System</h2>
+
+<input id="myId" placeholder="Your name (alpha)" />
+<input id="targetId" placeholder="Call user (beta)" />
+
+<br><br>
+
+<button onclick="register()">Register</button>
+<button onclick="startCall()">Call</button>
+<button onclick="answerCall()">Answer</button>
+<button onclick="hangUp()">Hang Up</button>
+
+<p id="status">Idle</p>
+<pre id="log"></pre>
+
+<audio id="remoteAudio" autoplay playsinline></audio>
+
+<script>
+const SERVER = "wss://voice-server-s87r.onrender.com";
+
+let ws;
+let pc;
+let myId;
+let targetId;
+let incoming = null;
+
+const logEl = document.getElementById("log");
+const statusEl = document.getElementById("status");
+
+function log(msg){
+  logEl.innerText += msg + "\n";
+}
+
+function setStatus(msg){
+  statusEl.innerText = msg;
+}
+
+// CONNECT
+function connect(){
+  ws = new WebSocket(SERVER);
+
+  ws.onmessage = async (e) => {
+    const data = JSON.parse(e.data);
+    log(JSON.stringify(data));
+
+    if(data.type === "busy"){
+      setStatus("User is busy 🚫");
+    }
+
+    if(data.type === "incoming"){
+      incoming = data;
+      setStatus("📞 Incoming call from " + data.from);
+    }
+
+    if(data.type === "answer"){
+      await pc.setRemoteDescription(data.payload.answer);
+      setStatus("In call 🎧");
+    }
+
+    if(data.type === "ice"){
+      try {
+        await pc.addIceCandidate(data.payload.candidate);
+      } catch {}
+    }
+
+    if(data.type === "hangup"){
+      cleanup();
+      setStatus("Call ended");
+    }
+  };
+}
+
+connect();
+
+// REGISTER
+function register(){
+  myId = document.getElementById("myId").value;
+
+  ws.send(JSON.stringify({
+    type:"register",
+    from: myId
+  }));
+
+  setStatus("Registered");
+}
+
+// PEER
+function createPeer(){
+  pc = new RTCPeerConnection({
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      {
+        urls: "turn:openrelay.metered.ca:80",
+        username: "openrelayproject",
+        credential: "openrelayproject"
+      }
+    ]
+  });
+
+  pc.ontrack = (e) => {
+    document.getElementById("remoteAudio").srcObject = e.streams[0];
+  };
+
+  pc.onicecandidate = (e) => {
+    if(e.candidate){
+      ws.send(JSON.stringify({
+        type:"ice",
+        from: myId,
+        to: targetId,
+        payload:{ candidate: e.candidate }
+      }));
+    }
+  };
+}
+
+// CALL
+async function startCall(){
+  targetId = document.getElementById("targetId").value;
+
+  createPeer();
+
+  const stream = await navigator.mediaDevices.getUserMedia({ audio:true });
+  stream.getTracks().forEach(t => pc.addTrack(t, stream));
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+
+  ws.send(JSON.stringify({
+    type:"call",
+    from: myId,
+    to: targetId,
+    payload:{ offer }
+  }));
+
+  setStatus("Calling...");
+}
+
+// ANSWER
+async function answerCall(){
+  if(!incoming) return;
+
+  targetId = incoming.from;
+
+  createPeer();
+
+  const stream = await navigator.mediaDevices.getUserMedia({ audio:true });
+  stream.getTracks().forEach(t => pc.addTrack(t, stream));
+
+  await pc.setRemoteDescription(incoming.payload.offer);
+
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+
+  ws.send(JSON.stringify({
+    type:"answer",
+    from: myId,
+    to: targetId,
+    payload:{ answer }
+  }));
+
+  setStatus("In call 🎧");
+}
+
+// HANGUP
+function hangUp(){
+  ws.send(JSON.stringify({
+    type:"hangup",
+    from: myId,
+    to: targetId
+  }));
+
+  cleanup();
+}
+
+function cleanup(){
+  if(pc) pc.close();
+  pc = null;
+  incoming = null;
+}
+</script>
+
+</body>
+</html>

@@ -32,11 +32,13 @@ let pc;
 let myId;
 let targetId;
 let incoming = null;
+let localStream = null;
 
 const logEl = document.getElementById("log");
 const statusEl = document.getElementById("status");
 
 function log(msg){
+  console.log(msg);
   logEl.innerText += msg + "\n";
 }
 
@@ -44,9 +46,21 @@ function setStatus(msg){
   statusEl.innerText = msg;
 }
 
+// 🔓 unlock audio on mobile
+document.body.addEventListener("click", () => {
+  const audio = document.getElementById("remoteAudio");
+  if (audio.srcObject) {
+    audio.play().catch(() => {});
+  }
+});
+
 // CONNECT
 function connect(){
   ws = new WebSocket(SERVER);
+
+  ws.onopen = () => {
+    log("Connected to server");
+  };
 
   ws.onmessage = async (e) => {
     const data = JSON.parse(e.data);
@@ -69,13 +83,19 @@ function connect(){
     if(data.type === "ice"){
       try {
         await pc.addIceCandidate(data.payload.candidate);
-      } catch {}
+      } catch (err) {
+        log("ICE error: " + err);
+      }
     }
 
     if(data.type === "hangup"){
       cleanup();
       setStatus("Call ended");
     }
+  };
+
+  ws.onclose = () => {
+    log("Disconnected from server");
   };
 }
 
@@ -106,10 +126,24 @@ function createPeer(){
     ]
   });
 
-  pc.ontrack = (e) => {
-    document.getElementById("remoteAudio").srcObject = e.streams[0];
+  // 🔥 CONNECTION DEBUG
+  pc.onconnectionstatechange = () => {
+    log("Connection state: " + pc.connectionState);
   };
 
+  // 🔥 AUDIO RECEIVING
+  pc.ontrack = (e) => {
+    const audio = document.getElementById("remoteAudio");
+    audio.srcObject = e.streams[0];
+
+    audio.play().then(() => {
+      log("🔊 Audio playing");
+    }).catch(() => {
+      log("⚠️ Tap screen to enable audio");
+    });
+  };
+
+  // ICE
   pc.onicecandidate = (e) => {
     if(e.candidate){
       ws.send(JSON.stringify({
@@ -128,8 +162,10 @@ async function startCall(){
 
   createPeer();
 
-  const stream = await navigator.mediaDevices.getUserMedia({ audio:true });
-  stream.getTracks().forEach(t => pc.addTrack(t, stream));
+  localStream = await navigator.mediaDevices.getUserMedia({ audio:true });
+  log("My tracks: " + JSON.stringify(localStream.getTracks()));
+
+  localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
 
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
@@ -152,8 +188,10 @@ async function answerCall(){
 
   createPeer();
 
-  const stream = await navigator.mediaDevices.getUserMedia({ audio:true });
-  stream.getTracks().forEach(t => pc.addTrack(t, stream));
+  localStream = await navigator.mediaDevices.getUserMedia({ audio:true });
+  log("My tracks: " + JSON.stringify(localStream.getTracks()));
+
+  localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
 
   await pc.setRemoteDescription(incoming.payload.offer);
 
@@ -181,9 +219,18 @@ function hangUp(){
   cleanup();
 }
 
+// CLEANUP
 function cleanup(){
-  if(pc) pc.close();
-  pc = null;
+  if(pc){
+    pc.close();
+    pc = null;
+  }
+
+  if(localStream){
+    localStream.getTracks().forEach(t => t.stop());
+    localStream = null;
+  }
+
   incoming = null;
 }
 </script>

@@ -3,7 +3,7 @@ const WebSocket = require("ws");
 
 const server = http.createServer((req, res) => {
   res.writeHead(200);
-  res.end("Voice server running (Stage 2)");
+  res.end("Voice server running (Stage 3.2)");
 });
 
 const wss = new WebSocket.Server({ server });
@@ -11,34 +11,12 @@ const wss = new WebSocket.Server({ server });
 // userId → Set of sockets
 const users = new Map();
 
-// user call states (NEW)
-const callState = new Map(); 
-// format: { userId: "idle | calling | ringing | in-call" }
+// active calls
+// callId → { from, to, answered }
+const calls = new Map();
 
-function setState(userId, state) {
-  callState.set(userId, state);
-}
-
-function getState(userId) {
-  return callState.get(userId) || "idle";
-}
-
-function addUser(userId, ws) {
-  if (!users.has(userId)) users.set(userId, new Set());
-  users.get(userId).add(ws);
-  setState(userId, "idle");
-}
-
-function removeUser(userId, ws) {
-  if (!users.has(userId)) return;
-
-  users.get(userId).delete(ws);
-
-  if (users.get(userId).size === 0) {
-    users.delete(userId);
-    callState.delete(userId);
-  }
-}
+// user → current callId
+const userCall = new Map();
 
 function send(userId, data) {
   const conns = users.get(userId);
@@ -51,6 +29,25 @@ function send(userId, data) {
       ws.send(msg);
     }
   }
+}
+
+function addUser(userId, ws) {
+  if (!users.has(userId)) users.set(userId, new Set());
+  users.get(userId).add(ws);
+}
+
+function removeUser(userId, ws) {
+  if (!users.has(userId)) return;
+
+  users.get(userId).delete(ws);
+
+  if (users.get(userId).size === 0) {
+    users.delete(userId);
+  }
+}
+
+function generateCallId() {
+  return Math.random().toString(36).slice(2);
 }
 
 wss.on("connection", (ws) => {
@@ -72,22 +69,28 @@ wss.on("connection", (ws) => {
       return;
     }
 
-    // CALL (STATE CONTROL ADDED)
+    // CALL
     if (data.type === "call") {
-      if (getState(data.to) !== "idle") {
-        send(data.from, {
-          type: "busy",
-          from: data.to
-        });
+      if (userCall.has(data.from) || userCall.has(data.to)) {
+        send(data.from, { type: "busy", from: data.to });
         return;
       }
 
-      setState(data.from, "calling");
-      setState(data.to, "ringing");
+      const callId = generateCallId();
+
+      calls.set(callId, {
+        from: data.from,
+        to: data.to,
+        answered: false
+      });
+
+      userCall.set(data.from, callId);
+      userCall.set(data.to, callId);
 
       send(data.to, {
         type: "incoming",
         from: data.from,
+        callId,
         payload: data.payload
       });
 
@@ -96,12 +99,18 @@ wss.on("connection", (ws) => {
 
     // ANSWER
     if (data.type === "answer") {
-      setState(data.from, "in-call");
-      setState(data.to, "in-call");
+      const callId = userCall.get(data.from);
+      if (!callId) return;
 
-      send(data.to, {
+      const call = calls.get(callId);
+      if (!call) return;
+
+      call.answered = true;
+
+      send(call.from, {
         type: "answer",
         from: data.from,
+        callId,
         payload: data.payload
       });
 
@@ -110,9 +119,18 @@ wss.on("connection", (ws) => {
 
     // ICE
     if (data.type === "ice") {
-      send(data.to, {
+      const callId = userCall.get(data.from);
+      if (!callId) return;
+
+      const call = calls.get(callId);
+      if (!call) return;
+
+      const other = call.from === data.from ? call.to : call.from;
+
+      send(other, {
         type: "ice",
         from: data.from,
+        callId,
         payload: data.payload
       });
 
@@ -121,13 +139,23 @@ wss.on("connection", (ws) => {
 
     // HANGUP
     if (data.type === "hangup") {
-      setState(data.from, "idle");
-      setState(data.to, "idle");
+      const callId = userCall.get(data.from);
+      if (!callId) return;
 
-      send(data.to, {
+      const call = calls.get(callId);
+      if (!call) return;
+
+      const other = call.from === data.from ? call.to : call.from;
+
+      send(other, {
         type: "hangup",
-        from: data.from
+        from: data.from,
+        callId
       });
+
+      userCall.delete(call.from);
+      userCall.delete(call.to);
+      calls.delete(callId);
 
       return;
     }
@@ -136,11 +164,26 @@ wss.on("connection", (ws) => {
   ws.on("close", () => {
     if (userId) {
       removeUser(userId, ws);
+
+      const callId = userCall.get(userId);
+      if (callId) {
+        const call = calls.get(callId);
+        if (call) {
+          const other = call.from === userId ? call.to : call.from;
+
+          send(other, { type: "hangup", from: userId });
+
+          userCall.delete(call.from);
+          userCall.delete(call.to);
+          calls.delete(callId);
+        }
+      }
+
       console.log("DISCONNECTED:", userId);
     }
   });
 });
 
 server.listen(process.env.PORT || 10000, "0.0.0.0", () => {
-  console.log("SERVER READY (STAGE 2)");
+  console.log("SERVER READY (STAGE 3.2)");
 });

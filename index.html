@@ -1,61 +1,117 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voice Call App</title>
+</head>
+
+<body style="font-family:sans-serif;text-align:center;padding:20px;">
+
+<h2>📞 Voice Call System</h2>
+
+<input id="myId" placeholder="Your name (alpha)" />
+<input id="targetId" placeholder="Call user (beta)" />
+
+<br><br>
+
+<button onclick="register()">Register</button>
+<button onclick="startCall()">Call</button>
+<button onclick="answerCall()">Answer</button>
+<button onclick="hangUp()">Hang Up</button>
+
+<p id="status">Loading...</p>
+<pre id="log" style="text-align:left;max-height:200px;overflow:auto;"></pre>
+
+<audio id="remoteAudio" autoplay playsinline></audio>
+
 <script>
+// 🔥 SAFE START
+window.onerror = function(err){
+  document.body.innerHTML += "<p style='color:red;'>CRASH: "+err+"</p>";
+};
+
+// CONFIG
 const SERVER = "wss://voice-server-s87r.onrender.com";
 
-let ws;
-let pc;
-let myId;
-let targetId;
-let incoming = null;
+// STATE
+let ws = null;
+let pc = null;
+let myId = null;
+let targetId = null;
 let callId = null;
+let incoming = null;
 let localStream = null;
 
-// DEVICE ID (persistent)
+// DEVICE ID
 let deviceId = localStorage.getItem("deviceId");
 if (!deviceId) {
   deviceId = Math.random().toString(36).slice(2);
   localStorage.setItem("deviceId", deviceId);
 }
 
+// UI
+const logEl = document.getElementById("log");
+const statusEl = document.getElementById("status");
+
 function log(msg){
   console.log(msg);
-  document.getElementById("log").innerText += msg + "\n";
+  logEl.innerText += msg + "\n";
 }
 
 function setStatus(msg){
-  document.getElementById("status").innerText = msg;
+  statusEl.innerText = msg;
 }
 
 // CONNECT
 function connect(){
+  log("Connecting...");
+
   ws = new WebSocket(SERVER);
 
+  ws.onopen = () => {
+    log("✅ Connected");
+    setStatus("Connected");
+  };
+
+  ws.onerror = () => {
+    log("❌ WS Error");
+    setStatus("Connection error");
+  };
+
+  ws.onclose = () => {
+    log("⚠️ Disconnected");
+  };
+
   ws.onmessage = async (e) => {
-    const data = JSON.parse(e.data);
-    log(JSON.stringify(data));
+    try {
+      const data = JSON.parse(e.data);
+      log(JSON.stringify(data));
 
-    if(data.type === "incoming"){
-      incoming = data;
-      callId = data.callId;
-      setStatus("📞 Incoming call from " + data.from);
-    }
+      if(data.type === "incoming"){
+        incoming = data;
+        callId = data.callId;
+        setStatus("📞 Incoming call from " + data.from);
+      }
 
-    if(data.type === "answer"){
-      await pc.setRemoteDescription(data.payload.answer);
-      setStatus("In call 🎧");
-    }
+      if(data.type === "answer"){
+        await pc.setRemoteDescription(data.payload.answer);
+        setStatus("In call 🎧");
+      }
 
-    if(data.type === "ice"){
-      await pc.addIceCandidate(data.payload.candidate);
-    }
+      if(data.type === "ice"){
+        await pc.addIceCandidate(data.payload.candidate);
+      }
 
-    if(data.type === "hangup"){
-      cleanup();
-      setStatus("Call ended");
+      if(data.type === "hangup"){
+        cleanup();
+        setStatus("Call ended");
+      }
+
+    } catch(err){
+      log("ERR: " + err);
     }
   };
 }
-
-connect();
 
 // REGISTER
 function register(){
@@ -67,7 +123,7 @@ function register(){
     deviceId
   }));
 
-  setStatus("Registered");
+  setStatus("Registered as " + myId);
 }
 
 // PEER
@@ -108,13 +164,10 @@ async function startCall(){
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
 
-  callId = Math.random().toString(36).slice(2);
-
   ws.send(JSON.stringify({
     type:"call",
     from: myId,
     to: targetId,
-    callId,
     deviceId,
     payload:{ offer }
   }));
@@ -127,6 +180,7 @@ async function answerCall(){
   if(!incoming) return;
 
   targetId = incoming.from;
+  callId = incoming.callId;
 
   createPeer();
 
@@ -152,6 +206,8 @@ async function answerCall(){
 
 // HANGUP
 function hangUp(){
+  if(!callId) return;
+
   ws.send(JSON.stringify({
     type:"hangup",
     from: myId,
@@ -163,6 +219,7 @@ function hangUp(){
   cleanup();
 }
 
+// CLEANUP
 function cleanup(){
   if(pc) pc.close();
   if(localStream) localStream.getTracks().forEach(t=>t.stop());
@@ -172,4 +229,10 @@ function cleanup(){
   incoming = null;
   callId = null;
 }
+
+// START
+connect();
 </script>
+
+</body>
+</html>

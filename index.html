@@ -1,29 +1,3 @@
-<!DOCTYPE html>
-<html>
-<head>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Voice Call App</title>
-</head>
-
-<body style="font-family:sans-serif;text-align:center;padding:20px;">
-
-<h2>📞 Voice Call System</h2>
-
-<input id="myId" placeholder="Your name (alpha)" />
-<input id="targetId" placeholder="Call user (beta)" />
-
-<br><br>
-
-<button onclick="register()">Register</button>
-<button onclick="startCall()">Call</button>
-<button onclick="answerCall()">Answer</button>
-<button onclick="hangUp()">Hang Up</button>
-
-<p id="status">Idle</p>
-<pre id="log"></pre>
-
-<audio id="remoteAudio" autoplay playsinline></audio>
-
 <script>
 const SERVER = "wss://voice-server-s87r.onrender.com";
 
@@ -32,46 +6,36 @@ let pc;
 let myId;
 let targetId;
 let incoming = null;
+let callId = null;
 let localStream = null;
 
-const logEl = document.getElementById("log");
-const statusEl = document.getElementById("status");
+// DEVICE ID (persistent)
+let deviceId = localStorage.getItem("deviceId");
+if (!deviceId) {
+  deviceId = Math.random().toString(36).slice(2);
+  localStorage.setItem("deviceId", deviceId);
+}
 
 function log(msg){
   console.log(msg);
-  logEl.innerText += msg + "\n";
+  document.getElementById("log").innerText += msg + "\n";
 }
 
 function setStatus(msg){
-  statusEl.innerText = msg;
+  document.getElementById("status").innerText = msg;
 }
-
-// 🔓 unlock audio on mobile
-document.body.addEventListener("click", () => {
-  const audio = document.getElementById("remoteAudio");
-  if (audio.srcObject) {
-    audio.play().catch(() => {});
-  }
-});
 
 // CONNECT
 function connect(){
   ws = new WebSocket(SERVER);
 
-  ws.onopen = () => {
-    log("Connected to server");
-  };
-
   ws.onmessage = async (e) => {
     const data = JSON.parse(e.data);
     log(JSON.stringify(data));
 
-    if(data.type === "busy"){
-      setStatus("User is busy 🚫");
-    }
-
     if(data.type === "incoming"){
       incoming = data;
+      callId = data.callId;
       setStatus("📞 Incoming call from " + data.from);
     }
 
@@ -81,21 +45,13 @@ function connect(){
     }
 
     if(data.type === "ice"){
-      try {
-        await pc.addIceCandidate(data.payload.candidate);
-      } catch (err) {
-        log("ICE error: " + err);
-      }
+      await pc.addIceCandidate(data.payload.candidate);
     }
 
     if(data.type === "hangup"){
       cleanup();
       setStatus("Call ended");
     }
-  };
-
-  ws.onclose = () => {
-    log("Disconnected from server");
   };
 }
 
@@ -107,7 +63,8 @@ function register(){
 
   ws.send(JSON.stringify({
     type:"register",
-    from: myId
+    from: myId,
+    deviceId
   }));
 
   setStatus("Registered");
@@ -116,40 +73,23 @@ function register(){
 // PEER
 function createPeer(){
   pc = new RTCPeerConnection({
-    iceServers: [
-      { urls: "stun:stun.l.google.com:19302" },
-      {
-        urls: "turn:openrelay.metered.ca:80",
-        username: "openrelayproject",
-        credential: "openrelayproject"
-      }
-    ]
+    iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
   });
 
-  // 🔥 CONNECTION DEBUG
-  pc.onconnectionstatechange = () => {
-    log("Connection state: " + pc.connectionState);
-  };
-
-  // 🔥 AUDIO RECEIVING
   pc.ontrack = (e) => {
     const audio = document.getElementById("remoteAudio");
     audio.srcObject = e.streams[0];
-
-    audio.play().then(() => {
-      log("🔊 Audio playing");
-    }).catch(() => {
-      log("⚠️ Tap screen to enable audio");
-    });
+    audio.play().catch(()=>{});
   };
 
-  // ICE
   pc.onicecandidate = (e) => {
     if(e.candidate){
       ws.send(JSON.stringify({
         type:"ice",
         from: myId,
         to: targetId,
+        callId,
+        deviceId,
         payload:{ candidate: e.candidate }
       }));
     }
@@ -163,17 +103,19 @@ async function startCall(){
   createPeer();
 
   localStream = await navigator.mediaDevices.getUserMedia({ audio:true });
-  log("My tracks: " + JSON.stringify(localStream.getTracks()));
-
   localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
 
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
 
+  callId = Math.random().toString(36).slice(2);
+
   ws.send(JSON.stringify({
     type:"call",
     from: myId,
     to: targetId,
+    callId,
+    deviceId,
     payload:{ offer }
   }));
 
@@ -189,8 +131,6 @@ async function answerCall(){
   createPeer();
 
   localStream = await navigator.mediaDevices.getUserMedia({ audio:true });
-  log("My tracks: " + JSON.stringify(localStream.getTracks()));
-
   localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
 
   await pc.setRemoteDescription(incoming.payload.offer);
@@ -202,6 +142,8 @@ async function answerCall(){
     type:"answer",
     from: myId,
     to: targetId,
+    callId,
+    deviceId,
     payload:{ answer }
   }));
 
@@ -213,27 +155,21 @@ function hangUp(){
   ws.send(JSON.stringify({
     type:"hangup",
     from: myId,
-    to: targetId
+    to: targetId,
+    callId,
+    deviceId
   }));
 
   cleanup();
 }
 
-// CLEANUP
 function cleanup(){
-  if(pc){
-    pc.close();
-    pc = null;
-  }
+  if(pc) pc.close();
+  if(localStream) localStream.getTracks().forEach(t=>t.stop());
 
-  if(localStream){
-    localStream.getTracks().forEach(t => t.stop());
-    localStream = null;
-  }
-
+  pc = null;
+  localStream = null;
   incoming = null;
+  callId = null;
 }
 </script>
-
-</body>
-</html>
